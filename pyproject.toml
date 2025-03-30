@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 authors = [{name="Jesse Grabowski", email='jessegrabowski@gmail.com'}]
 description = "Download EDGAR filings"
 readme = 'README.md'
-license = { file = 'LICENSE.txt'}
+license = { file = 'LICENSE'}
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Science/Research",
