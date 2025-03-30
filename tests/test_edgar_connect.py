@@ -13,9 +13,9 @@ class TestEDGARConnect(unittest.TestCase):
         mock_get.return_value.status_code = 200
         mock_get.return_value.content = b""
 
-        self.edgar_path = "mock_data/"
+        self.edgar_path = "tests/mock_data/"
         self.edgar_connect = EDGARConnect(
-            self.edgar_path, edgar_url="mock_data/mock_upstream/"
+            self.edgar_path, edgar_url="tests/mock_data/mock_upstream/"
         )
 
     def test_initialization(self):
