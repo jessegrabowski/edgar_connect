@@ -71,16 +71,12 @@ class EDGARConnect:
         --------
         EDGARConnect will create and fill the following directory structure within edgar_path:
 
-        edgar_path
-            |
-            +---master_indexes
-            |   |
-            |   +---{year}{quarter}.txt
-            |   |
-            |   ...
-            +---{form_name}
-            |   |
-            |   +---{Company_CIK}_{form_name}_{filing_date}_{file_name}.txt
+        edgar_path/
+        ├── master_indexes/
+        │   ├── {year}{quarter}.txt
+        │   └── ...
+        └── {form_name}/
+            └── {Company_CIK}_{form_name}_{filing_date}_{file_name}.txt
 
         master_indexes is a collection of pipe-delimited ("|") tables with the following 5 columns:
             CIK, Company_Name, Form_type, Date_filed , Filename.
@@ -169,12 +165,6 @@ class EDGARConnect:
         """
         Download the master list of filing URLs from the SEC EDGAR database.
 
-        .. warning::
-
-            NOTE THAT WITH DEFAULT SETTINGS, EDGARCONNECT WILL DOWNLOAD ALL AVAILABLE DATA 10-X FAMILY FILINGS (INCLUDING
-            10-K, 10-Q, AND ALL ASSOCIATED AMENDMENTS)FROM THE SEC EDGAR DATABASE. IN TOTAL, THIS REQUIRES OVER
-            100GB OF DATA. ***
-
         Parameters
         ----------
         update_range : int, optional
@@ -213,6 +203,13 @@ class EDGARConnect:
     ):
         """
         Provide parameters for scraping EDGAR.
+
+        .. warning::
+
+            With default settings, EDGARConnect will download all available data 10-X family filings (including
+            10-K, 10-Q, and all associated amendments) from the SEC EDGAR database. In total, this requires over
+            100GB of data! It is strongly recommended that you be more selective about what you download.
+
 
         Parameters
         ----------
