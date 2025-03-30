@@ -21,7 +21,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
     BarColumn,
-)  # Import additional columns for progress bar
+)
 from rich.table import Table
 from rich.console import Console
 
