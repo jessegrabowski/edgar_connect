@@ -37,7 +37,6 @@ keywords = [
 dependencies = [
     "numpy",
     "setuptools",
-    "sympy<1.13",
     "fake-useragent",
     "requests",
     "pandas",
