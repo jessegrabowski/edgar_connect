@@ -53,7 +53,7 @@ jobs:
         mamba-version: "*"
         activate-environment: edgar_connect
         channel-priority: strict
-        environment-file: conda_envs/edgar_connect.yml
+        environment-file: conda_envs/environment.yml
         python-version: ${{ matrix.python-version }}
         use-mamba: true
         use-only-tar-bz2: false # IMPORTANT: This may break caching of conda packages! See https://github.com/conda-incubator/setup-miniconda/issues/267
