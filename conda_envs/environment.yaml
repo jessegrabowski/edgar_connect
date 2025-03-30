@@ -1,0 +1,10 @@
+name: edgar_connect
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.12
+  - numpy
+  - requests
+  - fake-useragent
+  - pre-commit

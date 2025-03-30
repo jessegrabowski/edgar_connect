@@ -20,9 +20,15 @@ from ProgressBar import ProgressBar
 
 
 class EDGARConnect:
-
-    def __init__(self, edgar_path, user_agent=None, edgar_url='https://www.sec.gov/Archives', retry_kwargs=None,
-                 header=None, update_user_agent_interval=360):
+    def __init__(
+        self,
+        edgar_path,
+        user_agent=None,
+        edgar_url="https://www.sec.gov/Archives",
+        retry_kwargs=None,
+        header=None,
+        update_user_agent_interval=360,
+    ):
         """
         A class for downloading SEC filings from the EDGAR database.
 
@@ -86,19 +92,24 @@ class EDGARConnect:
         """
 
         if retry_kwargs is None:
-            retry_kwargs = dict(total=8, backoff_factor=1,
-                                status_forcelist=[403, 429, 500, 502, 503, 504],
-                                allowed_methods=["HEAD", "GET", "OPTIONS"])
+            retry_kwargs = dict(
+                total=8,
+                backoff_factor=1,
+                status_forcelist=[403, 429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS"],
+            )
 
         self.edgar_url = edgar_url
         self.user_agent = UserAgent()
 
         if header is None:
-            header = {'User-Agent': self.user_agent.random,
-                      'Accept-Encoding': 'gzip, deflate, br',
-                      'Accept-Language': 'en-us',
-                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                      'Host': "www.sec.gov"}
+            header = {
+                "User-Agent": self.user_agent.random,
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-us",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Host": "www.sec.gov",
+            }
 
         self.header = header
         self.last_user_agent_change = time.time()
@@ -113,17 +124,18 @@ class EDGARConnect:
         self._check_for_required_directories()
 
         self.forms = dict(
-            f_10k=['10-K', '10-K405', '10KSB', '10-KSB', '10KSB40'],
-            f_10ka=['10-K/A', '10-K405/A', '10KSB/A', '10-KSB/A', '10KSB40/A'],
-            f_10kt=['10-KT', '10KT405', '10-KT/A', '10KT405/A'],
-            f_10q=['10-Q', '10QSB', '10-QSB'],
-            f_10qa=['10-Q/A', '10QSB/A', '10-QSB/A'],
-            f_10qt=['10-QT', '10-QT/A'],
-            f_10x=[])
+            f_10k=["10-K", "10-K405", "10KSB", "10-KSB", "10KSB40"],
+            f_10ka=["10-K/A", "10-K405/A", "10KSB/A", "10-KSB/A", "10KSB40/A"],
+            f_10kt=["10-KT", "10KT405", "10-KT/A", "10KT405/A"],
+            f_10q=["10-Q", "10QSB", "10-QSB"],
+            f_10qa=["10-Q/A", "10QSB/A", "10-QSB/A"],
+            f_10qt=["10-QT", "10-QT/A"],
+            f_10x=[],
+        )
 
         for key in self.forms.keys():
-            if key != 'f_10x':
-                self.forms['f_10x'].extend(self.forms[key])
+            if key != "f_10x":
+                self.forms["f_10x"].extend(self.forms[key])
 
         self.start_date = None
         self.end_date = None
@@ -155,7 +167,7 @@ class EDGARConnect:
 
         update_quarters = [end_date - i for i in range(update_range)]
 
-        progress_bar = ProgressBar(total=n_quarters, verb='Downloading')
+        progress_bar = ProgressBar(total=n_quarters, verb="Downloading")
         for i in range(n_quarters):
             progress_bar.start()
 
@@ -166,7 +178,9 @@ class EDGARConnect:
 
             progress_bar.stop()
 
-    def configure_downloader(self, target_forms, start_date='01-01-1994', end_date=None):
+    def configure_downloader(
+        self, target_forms, start_date="01-01-1994", end_date=None
+    ):
         """
         Provide parameters for scraping EDGAR. This method must be run before batch downloading via the
         download_requested_filings() method can be executed.
@@ -193,20 +207,22 @@ class EDGARConnect:
         if isinstance(target_forms, str):
             if target_forms.lower() in self.forms.keys():
                 target_forms = self.forms[target_forms.lower()]
-            elif target_forms.lower() in ['10k', 'all', 'everything']:
-                target_forms = self.forms['f_10x']
+            elif target_forms.lower() in ["10k", "all", "everything"]:
+                target_forms = self.forms["f_10x"]
             else:
                 target_forms = [target_forms]
 
         self.target_forms = target_forms
-        self.start_date = pd.to_datetime(start_date).to_period('Q')
+        self.start_date = pd.to_datetime(start_date).to_period("Q")
 
         if end_date is None:
             end_date = dt.today()
-        self.end_date = pd.to_datetime(end_date).to_period('Q')
+        self.end_date = pd.to_datetime(end_date).to_period("Q")
         self._configured = True
 
-    def download_requested_filings(self, ignore_time_guidelines=False, remove_attachments=False):
+    def download_requested_filings(
+        self, ignore_time_guidelines=False, remove_attachments=False
+    ):
         """
         Method for downloading all forums meeting the requirements set in the configure_downloader() method. That method
         must be run before running this one.
@@ -238,16 +254,19 @@ class EDGARConnect:
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        print(f'Gathering URLS for the requested forms...')
-        required_files = [f'{(start_date + i).year}Q{(start_date + i).quarter}.txt' for i in range(n_quarters)]
+        print(f"Gathering URLS for the requested forms...")
+        required_files = [
+            f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
+            for i in range(n_quarters)
+        ]
 
         for i, file_path in enumerate(required_files):
-            date_str = required_files[i].split('.')[0]
-            print(f'Beginning scraping from {date_str}')
+            date_str = required_files[i].split(".")[0]
+            print(f"Beginning scraping from {date_str}")
             self._time_check(ignore_time_guidelines)
 
             path = os.path.join(self.master_path, file_path)
-            df = pd.read_csv(path, delimiter='|')
+            df = pd.read_csv(path, delimiter="|")
             df = df.drop_duplicates()
 
             for form in self.target_forms:
@@ -266,9 +285,13 @@ class EDGARConnect:
 
                 if n_targets == 0:
                     if n_forms == 0:
-                        print(f'{date_str} {form:<10} No filings found on EDGAR, continuing...')
+                        print(
+                            f"{date_str} {form:<10} No filings found on EDGAR, continuing..."
+                        )
                     else:
-                        print(f'{date_str} {form:<10} All filings downloaded, continuing...')
+                        print(
+                            f"{date_str} {form:<10} All filings downloaded, continuing..."
+                        )
                 else:
                     target_mask = new_filenames.isin(download_targets)
                     rows_to_query = df.reindex(new_filenames.index)[target_mask]
@@ -276,13 +299,17 @@ class EDGARConnect:
                     n_to_download = rows_to_query.shape[0]
                     n_already_downloaded = n_forms - n_to_download
 
-                    print(f'{date_str} {form:<10} Found {n_already_downloaded} / {n_forms} locally, requesting '
-                          f'the remaining {n_to_download}...')
-                    progress_bar = ProgressBar(total=n_forms,
-                                               verb=f'{date_str} {form:<10}',
-                                               start_at=n_already_downloaded,
-                                               bar_length=40,
-                                               begin_on_newline=False)
+                    print(
+                        f"{date_str} {form:<10} Found {n_already_downloaded} / {n_forms} locally, requesting "
+                        f"the remaining {n_to_download}..."
+                    )
+                    progress_bar = ProgressBar(
+                        total=n_forms,
+                        verb=f"{date_str} {form:<10}",
+                        start_at=n_already_downloaded,
+                        bar_length=40,
+                        begin_on_newline=False,
+                    )
 
                     for iterrow_tuple in rows_to_query.iterrows():
                         idx, row = iterrow_tuple
@@ -291,14 +318,14 @@ class EDGARConnect:
 
                         progress_bar.start()
 
-                        target_url = self.edgar_url + '/' + row['Filename']
-                        referer = target_url.replace('.txt', '-index.html')
-                        self.header['Referer'] = referer
+                        target_url = self.edgar_url + "/" + row["Filename"]
+                        referer = target_url.replace(".txt", "-index.html")
+                        self.header["Referer"] = referer
 
                         filing = self.http.get(target_url, headers=self.header)
 
-                        with open(out_path, 'w') as file:
-                            file.write(filing.content.decode('utf-8', 'ignore'))
+                        with open(out_path, "w") as file:
+                            file.write(filing.content.decode("utf-8", "ignore"))
 
                         if remove_attachments:
                             self.strip_attachments_from_filing(out_path)
@@ -307,10 +334,9 @@ class EDGARConnect:
                         self._update_user_agent()
 
     def show_available_forms(self):
-
-        print('Available forms:')
+        print("Available forms:")
         for key, value in self.forms.items():
-            print(f'{key} -> {value}')
+            print(f"{key} -> {value}")
 
     def show_download_plan(self):
         self._check_config()
@@ -322,7 +348,10 @@ class EDGARConnect:
         n_quarters = (end_date - start_date).n + 1
 
         form_counter = Counter()
-        required_files = [f'{(start_date + i).year}Q{(start_date + i).quarter}.txt' for i in range(n_quarters)]
+        required_files = [
+            f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
+            for i in range(n_quarters)
+        ]
 
         for file in required_files:
             file_path = os.path.join(self.master_path, file)
@@ -331,34 +360,44 @@ class EDGARConnect:
 
         form_sum = 0
 
-        print(f'EDGARConnect is prepared to download {len(forms)} types of filings between {start_date} and {end_date}')
+        print(
+            f"EDGARConnect is prepared to download {len(forms)} types of filings between {start_date} and {end_date}"
+        )
         for form in forms:
-            print(f'\tNumber of {form}s: {form_counter[form]}')
+            print(f"\tNumber of {form}s: {form_counter[form]}")
             form_sum += form_counter[form]
 
-        print('=' * 30)
-        print(f'\tTotal files: {form_sum}')
+        print("=" * 30)
+        print(f"\tTotal files: {form_sum}")
 
         m, s = np.divmod(form_sum, 60)
         h, m = np.divmod(m, 60)
         d, h = np.divmod(h, 24)
 
-        print(f'Estimated download time, assuming 1s per file: {d} Days, {h} hours, {m} minutes, {s} seconds')
-        print(f'Estimated drive space, assuming 150KB per filing: {form_sum * 150 * 1e-6:0.2f}GB')
+        print(
+            f"Estimated download time, assuming 1s per file: {d} Days, {h} hours, {m} minutes, {s} seconds"
+        )
+        print(
+            f"Estimated drive space, assuming 150KB per filing: {form_sum * 150 * 1e-6:0.2f}GB"
+        )
 
     def _update_user_agent(self, force_update=False):
-        time_to_update = (time.time() - self.last_user_agent_change) < self.update_user_agent_interval
+        time_to_update = (
+            time.time() - self.last_user_agent_change
+        ) < self.update_user_agent_interval
 
         if time_to_update or force_update:
-            self.header['User-Agent'] = self.user_agent.random
+            self.header["User-Agent"] = self.user_agent.random
             self.last_user_agent_change = time.time()
 
     def _check_config(self):
         if not self._configured:
-            raise ValueError("First define scrape parameters using the configure_downloader() method")
+            raise ValueError(
+                "First define scrape parameters using the configure_downloader() method"
+            )
 
     def _check_for_required_directories(self):
-        self.master_path = os.path.join(self.edgar_path, 'master_indexes')
+        self.master_path = os.path.join(self.edgar_path, "master_indexes")
 
         self._master_paths_configured = os.path.isdir(self.master_path)
         if not self._master_paths_configured:
@@ -370,68 +409,75 @@ class EDGARConnect:
         n_quarters = (end_date - start_date).n + 1
 
         index_files = os.listdir(self.master_path)
-        required_files = [f'{(start_date + i).year}Q{(start_date + i).quarter}.txt' for i in range(n_quarters)]
+        required_files = [
+            f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
+            for i in range(n_quarters)
+        ]
 
         file_checks = [file in index_files for file in required_files]
 
         if not all(file_checks):
-            error = 'Not all requested dates have an downloaded index file, including:\n'
+            error = (
+                "Not all requested dates have an downloaded index file, including:\n"
+            )
             for i, check in enumerate(file_checks):
                 if not check:
-                    error += f'\t {required_files[i]}\n'
-            error += 'Have you run the method download_master_indexes() to sync local records with the SEC database?'
+                    error += f"\t {required_files[i]}\n"
+            error += "Have you run the method download_master_indexes() to sync local records with the SEC database?"
             raise ValueError(error)
 
     def __repr__(self):
-        out = 'SEC Edgar Scraper for Python, v0.0\n'
+        out = "SEC Edgar Scraper for Python, v0.0\n"
         if not self._configured:
-            out += 'Files to be scraped have NOT been defined.\n'
-            out += 'Choose scraping targets using the configure_downloader() method'
+            out += "Files to be scraped have NOT been defined.\n"
+            out += "Choose scraping targets using the configure_downloader() method"
 
         else:
-            out += 'EDGARConnect is configured for scraping.\n'
-            out += f'\t Target Forms: {self.target_forms}\n'
-            out += f'\t Date Range: {self.start_date} to {self.end_date}\n'
+            out += "EDGARConnect is configured for scraping.\n"
+            out += f"\t Target Forms: {self.target_forms}\n"
+            out += f"\t Date Range: {self.start_date} to {self.end_date}\n"
 
         return out
 
     def _update_master_index(self, date, force_redownload):
         target_year = date.year
         target_quarter = date.quarter
-        target_url = f'{self.edgar_url}/edgar/full-index/{target_year}/QTR{target_quarter}/master.zip'
+        target_url = f"{self.edgar_url}/edgar/full-index/{target_year}/QTR{target_quarter}/master.zip"
 
-        out_path = os.path.join(self.master_path, f'{target_year}Q{target_quarter}.txt')
+        out_path = os.path.join(self.master_path, f"{target_year}Q{target_quarter}.txt")
         file_downloaded = True
 
         if not os.path.isfile(out_path) or force_redownload:
             file_downloaded = False
-            with open(out_path, 'w') as file:
-                file.write('CIK|Company_Name|Form_type|Date_filed|Filename\n')
+            with open(out_path, "w") as file:
+                file.write("CIK|Company_Name|Form_type|Date_filed|Filename\n")
 
         if not file_downloaded:
             master_zip = self.http.get(target_url, headers=self.header)
             master_list = ZipFile(BytesIO(master_zip.content))
-            master_list = master_list.open('master.idx') \
-                              .read() \
-                              .decode('utf-8', 'ignore') \
-                              .splitlines()[11:]
+            master_list = (
+                master_list.open("master.idx")
+                .read()
+                .decode("utf-8", "ignore")
+                .splitlines()[11:]
+            )
 
-            with open(out_path, 'a') as file:
+            with open(out_path, "a") as file:
                 for line in master_list:
                     file.write(line)
-                    file.write('\n')
+                    file.write("\n")
 
     @staticmethod
     def _get_date_from_row(row):
-        date = pd.to_datetime(row['Date_filed']).to_period('Q')
+        date = pd.to_datetime(row["Date_filed"]).to_period("Q")
         date_str = str(date)
 
         return date_str
 
     @staticmethod
     def _get_cik_from_row(row):
-        cik = row['CIK']
-        zeros = '0' * (10 - len(str(cik)))
+        cik = row["CIK"]
+        zeros = "0" * (10 - len(str(cik)))
         cik_str = zeros + str(cik)
 
         return cik_str
@@ -439,14 +485,14 @@ class EDGARConnect:
     def _create_new_filename(self, row):
         cik_str = self._get_cik_from_row(row)
         date_str = self._get_date_from_row(row)
-        filename = row['Filename'].split('/')[-1]
+        filename = row["Filename"].split("/")[-1]
 
-        new_filename = f'{cik_str}_{date_str}_{filename}'
+        new_filename = f"{cik_str}_{date_str}_{filename}"
 
         return new_filename
 
     def _create_output_directory(self, form_type):
-        dirsafe_form = form_type.replace('/', '')
+        dirsafe_form = form_type.replace("/", "")
         out_dir = os.path.join(self.edgar_path, dirsafe_form)
 
         if not os.path.isdir(out_dir):
@@ -456,8 +502,11 @@ class EDGARConnect:
 
     @staticmethod
     def get_next_document_chunk(text, last_end_idx=0):
-        doc_start_idx = text.find('<DOCUMENT>', last_end_idx, )
-        doc_end_idx = text.find(r'</DOCUMENT>', doc_start_idx) + len('</DOCUMENT>')
+        doc_start_idx = text.find(
+            "<DOCUMENT>",
+            last_end_idx,
+        )
+        doc_end_idx = text.find(r"</DOCUMENT>", doc_start_idx) + len("</DOCUMENT>")
 
         return slice(doc_start_idx, doc_end_idx)
 
@@ -466,11 +515,11 @@ class EDGARConnect:
         doc_counter = 0
         results = {}
         try:
-            with open(filing_path, 'r', encoding='utf-8') as file:
+            with open(filing_path, "r", encoding="utf-8") as file:
                 text = file.read()
         except UnicodeDecodeError:
             try:
-                with open(filing_path, 'r') as file:
+                with open(filing_path, "r") as file:
                     text = file.read()
             except:
                 return
@@ -478,19 +527,24 @@ class EDGARConnect:
         while True:
             doc_slice = self.get_next_document_chunk(text, start_idx)
             doc = text[doc_slice]
-            is_img = re.search('<FILENAME>.+\.(gif|jpg|jpeg|bmp|png|pdf|xls|xlsx|zip)', doc[:1000]) is not None
-            results[doc_counter] = {'slice': doc_slice, 'is_img': is_img}
+            is_img = (
+                re.search(
+                    "<FILENAME>.+\.(gif|jpg|jpeg|bmp|png|pdf|xls|xlsx|zip)", doc[:1000]
+                )
+                is not None
+            )
+            results[doc_counter] = {"slice": doc_slice, "is_img": is_img}
 
             start_idx = doc_slice.stop
             doc_counter += 1
             if doc_slice.start == -1:
                 break
 
-        with open(filing_path, 'w', encoding='utf-8') as file:
+        with open(filing_path, "w", encoding="utf-8") as file:
             for i in range(len(results)):
                 result = results[i]
-                if not result['is_img']:
-                    doc_slice = result['slice']
+                if not result["is_img"]:
+                    doc_slice = result["slice"]
                     doc = text[doc_slice]
                     file.write(doc)
 
@@ -506,7 +560,7 @@ class EDGARConnect:
         sec_server_open = 21
         sec_server_close = 6
         local_time = dt.now().astimezone()
-        est_timezone = pytz.timezone('US/Eastern')
+        est_timezone = pytz.timezone("US/Eastern")
         est_dt = local_time.astimezone(est_timezone)
 
         return est_dt.hour >= sec_server_open or est_dt.hour < sec_server_close
@@ -515,11 +569,11 @@ class EDGARConnect:
         SEC_servers_open = self._check_time_is_SEC_recommended()
 
         if not SEC_servers_open and not ignore_time_guidelines:
-            print('''SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
-                     a lot of stuff, it is strongly recommended that you wait until then to begin. If your query size 
-                     is relatively small, or if it's big but you feel like ignoring this guidance from the good people 
+            print("""SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
+                     a lot of stuff, it is strongly recommended that you wait until then to begin. If your query size
+                     is relatively small, or if it's big but you feel like ignoring this guidance from the good people
                      at the SEC, re-run this function with the argument:
-                     
-                     ignore_time_guidelines = True''')
+
+                     ignore_time_guidelines = True""")
 
             raise SECServerClosedError()
