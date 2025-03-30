@@ -1,0 +1,15 @@
+name: edgar_connect
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - numpy
+  - pandas
+  - rich
+  - requests
+  - pytz
+  - fake-useragent
+
+  - pytest
+  - pytest-cov
+  - pre-commit
