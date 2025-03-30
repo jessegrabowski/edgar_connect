@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "EDGARConnect"
+name = "edgar_connect"
 dynamic = ['version']
 requires-python = ">=3.11"
 authors = [{name="Jesse Grabowski", email='jessegrabowski@gmail.com'}]
@@ -39,7 +39,10 @@ dependencies = [
     "setuptools",
     "sympy<1.13",
     "fake-useragent",
-    "requests"
+    "requests",
+    "pandas",
+    "rich",
+    "pytz"
   ]
 
 [project.optional-dependencies]
@@ -71,8 +74,8 @@ docs = [
 [tool.versioneer]
 VCS = "git"
 style = "pep440"
-versionfile_source = "EDGARConnect/_version.py"
-versionfile_build = "EDGARConnect/_version.py"
+versionfile_source = "edgar_connect/_version.py"
+versionfile_build = "edgar_connect/_version.py"
 tag_prefix = 'v'
 
 

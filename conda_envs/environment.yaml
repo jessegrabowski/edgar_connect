@@ -3,8 +3,13 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python>=3.12
   - numpy
+  - pandas
+  - rich
   - requests
+  - pytz
   - fake-useragent
+
+  - pytest
+  - pytest-cov
   - pre-commit
