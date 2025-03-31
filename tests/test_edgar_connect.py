@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 import pandas as pd
-from fake_useragent import FakeUserAgent
 
 from edgar_connect.edgar_connect import EDGARConnect
+from edgar_connect.user_agent import UserAgent
 
 
 class TestEDGARConnect(unittest.TestCase):
@@ -21,7 +21,7 @@ class TestEDGARConnect(unittest.TestCase):
     def test_initialization(self):
         self.assertEqual(self.edgar_connect.edgar_path, self.edgar_path)
         self.assertIsNotNone(self.edgar_connect.header)
-        self.assertIsInstance(self.edgar_connect.user_agent, FakeUserAgent)
+        self.assertIsInstance(self.edgar_connect.user_agent, UserAgent)
 
     def test_configure_downloader(self):
         self.edgar_connect.configure_downloader(
