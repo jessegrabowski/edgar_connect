@@ -1,10 +1,11 @@
 import os
 import time
 import logging
+from copy import deepcopy
 from datetime import datetime as dt
 import requests
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 import pandas as pd
 import numpy as np
 
@@ -29,6 +30,14 @@ from pathlib import Path
 
 
 _log = logging.getLogger(__name__)
+
+
+RETRY_DEFAULTS = dict(
+    total=8,
+    backoff_factor=1,
+    status_forcelist=[403, 429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+)
 
 
 class EDGARConnect:
@@ -94,15 +103,6 @@ class EDGARConnect:
         download_requested_filings() method. Note that download settings must first be set using the
         configure_downloader() method.
         """
-
-        if retry_kwargs is None:
-            retry_kwargs = dict(
-                total=8,
-                backoff_factor=1,
-                status_forcelist=[403, 429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS"],
-            )
-
         self.edgar_url = edgar_url
         self.user_agent = UserAgent(user_agent=user_agent)
 
@@ -119,10 +119,7 @@ class EDGARConnect:
         self.last_user_agent_change = time.time()
         self.update_user_agent_interval = update_user_agent_interval
 
-        retry_strategy = Retry(**retry_kwargs)
-        self.adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.http = requests.Session()
-        self.http.mount("https://", self.adapter)
+        self.http = self._build_session(retry_kwargs)
 
         self.edgar_path = edgar_path
         self.master_path = Path(self.edgar_path) / "master_indexes"
@@ -147,6 +144,29 @@ class EDGARConnect:
         self.target_forms = None
         self._configured = False
         self.time_message_displayed = False
+
+    def _build_session(self, retry_kwargs: dict | None = None):
+        """
+        Build a requests session with the given retry strategy.
+
+        Parameters
+        ----------
+        retry_kwargs : dict
+            A dictionary of keyword arguments to pass to requests.packages.urllib3.util.retry.Retry.
+
+        Returns
+        -------
+        requests.Session
+            A configured requests session.
+        """
+        if retry_kwargs is None:
+            retry_kwargs = deepcopy(RETRY_DEFAULTS)
+
+        retry_strategy = Retry(**retry_kwargs)
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session = requests.Session()
+        session.mount("https://", adapter)
+        return session
 
     @staticmethod
     def _make_progress_bar():
@@ -253,15 +273,13 @@ class EDGARConnect:
         out_path: str,
         new_filename: str,
         timeout: int = 30,
-        max_attempts: int = 2,
     ):
         """
-        Download a file from the specified URL and save it locally, retrying once on connection or timeout errors.
+        Download a file from the specified URL and save it locally.
 
         This function attempts to download the content from `target_url` and writes it to `out_path`.
         It updates the user agent before making the HTTP request and handles potential timeouts or
-        connection errors by retrying the request one additional time. If the download fails after two attempts,
-        it logs the failure and skips saving the file.
+        connection errors by retrying the request based on the configured retry strategy.
 
         Parameters
         ----------
@@ -273,36 +291,25 @@ class EDGARConnect:
             The new file name used for logging purposes to identify the file.
         timeout : int, optional
             The timeout in seconds for the HTTP request, by default 30.
-        max_attempts: int, optional
-            Maximum number of attempts to download the file. Default is 2.
 
         Returns
         -------
         None
             This function does not return a value. On successful download, the file is written to disk;
-            otherwise, it logs an error message after the allowed retry attempts.
+            otherwise, it logs an error message.
         """
-        attempts = 0
+        try:
+            self._update_user_agent()
+            filing = self.http.get(target_url, headers=self.header, timeout=timeout)
 
-        while attempts < max_attempts:
-            try:
-                self._update_user_agent()
-                filing = self.http.get(target_url, headers=self.header, timeout=timeout)
+            with open(out_path, "w") as file:
+                file.write(filing.content.decode("utf-8", "ignore"))
 
-                with open(out_path, "w") as file:
-                    file.write(filing.content.decode("utf-8", "ignore"))
-                return
-
-            except (
-                requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-            ):
-                _log.info(
-                    f"\nAttempt {attempts + 1} failed for {new_filename} due to timeout/connection error"
-                )
-                attempts += 1
-
-        _log.info(f"\nSkipping {new_filename} after {max_attempts} failed attempts")
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as e:
+            _log.info(f"\nFailed to download {new_filename} due to {str(e)}")
 
     def download_requested_filings(
         self,
@@ -310,6 +317,7 @@ class EDGARConnect:
         remove_attachments=False,
         timeout: int = 30,
         max_attempts: int = 2,
+        retry_kwargs=None,
     ):
         """
         Method for downloading all forms meeting the requirements set in the configure_downloader() method.
@@ -324,7 +332,9 @@ class EDGARConnect:
             Maximum number of seconds to wait for a file download before skipping it.
         max_attempts: int, optional
             Maximum number of tries to download a file before skipping it.
-
+        retry_kwargs: dict, optional
+            Keyword arguments passed to urllib3.util.retry.Retry. This tool configures how and under what conditions
+            a connection is re-tried after a timeout or bad status code.
         Returns
         -------
         None
@@ -332,6 +342,9 @@ class EDGARConnect:
 
         self._check_config()
         self._time_check(ignore_time_guidelines)
+
+        if retry_kwargs is not None:
+            self.http = self._build_session(retry_kwargs)
 
         start_date = self.start_date
         end_date = self.end_date
