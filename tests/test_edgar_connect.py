@@ -73,7 +73,7 @@ class TestEDGARConnect(unittest.TestCase):
             target_forms="10-K", start_date="01-01-2020", end_date="06-01-2020"
         )
 
-        self.edgar_connect.download_requested_filings()
+        self.edgar_connect.download_requested_filings(ignore_time_guidelines=True)
 
         # Check if the mock_get was called (indicating a download attempt)
         self.assertTrue(mock_get.called)
