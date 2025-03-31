@@ -267,7 +267,7 @@ class EDGARConnect:
         self.end_date = pd.to_datetime(end_date).to_period("Q")
         self._configured = True
 
-    def _download_file_with_retries(
+    def _download_and_save_filing(
         self,
         target_url: str,
         out_path: str,
@@ -316,7 +316,6 @@ class EDGARConnect:
         ignore_time_guidelines=False,
         remove_attachments=False,
         timeout: int = 30,
-        max_attempts: int = 2,
         retry_kwargs=None,
     ):
         """
@@ -330,8 +329,6 @@ class EDGARConnect:
             If True, removes embedded attachments from filings to save disk space. Default is False.
         timeout: int, optional
             Maximum number of seconds to wait for a file download before skipping it.
-        max_attempts: int, optional
-            Maximum number of tries to download a file before skipping it.
         retry_kwargs: dict, optional
             Keyword arguments passed to urllib3.util.retry.Retry. This tool configures how and under what conditions
             a connection is re-tried after a timeout or bad status code.
@@ -417,12 +414,11 @@ class EDGARConnect:
                             target_url = self.edgar_url + "/" + row["Filename"]
                             referer = target_url.replace(".txt", "-index.html")
                             self.header["Referer"] = referer
-                            self._download_file_with_retries(
+                            self._download_and_save_filing(
                                 target_url=target_url,
                                 out_path=out_path,
                                 new_filename=new_filename,
                                 timeout=timeout,
-                                max_attempts=max_attempts,
                             )
                             if remove_attachments:
                                 self.strip_attachments_from_filing(out_path)
