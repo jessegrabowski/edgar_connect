@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from datetime import datetime as dt
 import requests
 from requests.adapters import HTTPAdapter
@@ -24,6 +25,9 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.console import Console
+
+
+_log = logging.getLogger(__name__)
 
 
 class EDGARConnect:
@@ -286,7 +290,7 @@ class EDGARConnect:
             requests.exceptions.Timeout,
             requests.exceptions.ConnectionError,
         ):
-            print(
+            _log.info(
                 f"\nAttempt {attempts + 1} failed for {new_filename} due to timeout/connection error"
             )
             attempts += 1
@@ -294,7 +298,7 @@ class EDGARConnect:
                 self._update_user_agent()
 
             else:
-                print(f"\nSkipping {new_filename} after 2 failed attempts")
+                _log.info(f"\nSkipping {new_filename} after 2 failed attempts")
                 return
 
     def download_requested_filings(
@@ -324,7 +328,7 @@ class EDGARConnect:
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        print("Gathering URLS for the requested forms...")
+        _log.info("Gathering URLS for the requested forms...")
         required_files = [
             f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
             for i in range(n_quarters)
@@ -333,7 +337,7 @@ class EDGARConnect:
         with self._make_progress_bar() as progress:
             for i, file_path in enumerate(required_files):
                 date_str = required_files[i].split(".")[0]
-                print(f"Beginning scraping from {date_str}")
+                _log.info(f"Beginning scraping from {date_str}")
                 self._time_check(ignore_time_guidelines)
 
                 path = os.path.join(self.master_path, file_path)
@@ -358,11 +362,11 @@ class EDGARConnect:
 
                     if n_targets == 0:
                         if n_forms == 0:
-                            print(
+                            _log.info(
                                 f"{date_str} {form:<10} No filings found on EDGAR, continuing..."
                             )
                         else:
-                            print(
+                            _log.info(
                                 f"{date_str} {form:<10} All filings downloaded, continuing..."
                             )
                     else:
@@ -372,7 +376,7 @@ class EDGARConnect:
                         n_to_download = rows_to_query.shape[0]
                         n_already_downloaded = n_forms - n_to_download
 
-                        print(
+                        _log.info(
                             f"{date_str} {form:<10} Found {n_already_downloaded} / {n_forms} locally, requesting "
                             f"the remaining {n_to_download}..."
                         )
@@ -452,24 +456,24 @@ class EDGARConnect:
 
         form_sum = 0
 
-        print(
+        _log.info(
             f"EDGARConnect is prepared to download {len(forms)} types of filings between {start_date} and {end_date}"
         )
         for form in forms:
-            print(f"\tNumber of {form}s: {form_counter[form]}")
+            _log.info(f"\tNumber of {form}s: {form_counter[form]}")
             form_sum += form_counter[form]
 
-        print("=" * 30)
-        print(f"\tTotal files: {form_sum}")
+        _log.info("=" * 30)
+        _log.info(f"\tTotal files: {form_sum}")
 
         m, s = np.divmod(form_sum, 60)
         h, m = np.divmod(m, 60)
         d, h = np.divmod(h, 24)
 
-        print(
+        _log.info(
             f"Estimated download time, assuming 1s per file: {d} Days, {h} hours, {m} minutes, {s} seconds"
         )
-        print(
+        _log.info(
             f"Estimated drive space, assuming 150KB per filing: {form_sum * 150 * 1e-6:0.2f}GB"
         )
 
@@ -859,7 +863,7 @@ class EDGARConnect:
         SEC_servers_open = self._check_time_is_SEC_recommended()
 
         if not SEC_servers_open and not ignore_time_guidelines:
-            print("""SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
+            _log.warning("""SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
                      a lot of stuff, it is strongly recommended that you wait until then to begin. If your query size
                      is relatively small, or if it's big but you feel like ignoring this guidance from the good people
                      at the SEC, re-run this function with the argument:
