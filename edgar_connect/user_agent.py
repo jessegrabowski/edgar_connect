@@ -10,7 +10,7 @@ class UserAgent:
         self.user_agent = user_agent
         self.fake = Faker()
 
-    def random_user_agent(self):
+    def update_user_agent(self):
         """
         Generate a User-Agent header in the form requested by the SEC. See here for details:
 

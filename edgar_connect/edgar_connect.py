@@ -25,6 +25,7 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.console import Console
+from pathlib import Path
 
 
 _log = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class EDGARConnect:
 
         if header is None:
             header = {
-                "User-Agent": self.user_agent.random_user_agent(),
+                "User-Agent": self.user_agent.update_user_agent(),
                 "Accept-Encoding": "gzip, deflate, br",
                 "Accept-Language": "en-us",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -124,6 +125,7 @@ class EDGARConnect:
         self.http.mount("https://", self.adapter)
 
         self.edgar_path = edgar_path
+        self.master_path = Path(self.edgar_path) / "master_indexes"
         self._check_for_required_directories()
 
         self.forms = dict(
@@ -251,6 +253,7 @@ class EDGARConnect:
         out_path: str,
         new_filename: str,
         timeout: int = 30,
+        max_attempts: int = 2,
     ):
         """
         Download a file from the specified URL and save it locally, retrying once on connection or timeout errors.
@@ -270,6 +273,8 @@ class EDGARConnect:
             The new file name used for logging purposes to identify the file.
         timeout : int, optional
             The timeout in seconds for the HTTP request, by default 30.
+        max_attempts: int, optional
+            Maximum number of attempts to download the file. Default is 2.
 
         Returns
         -------
@@ -279,30 +284,32 @@ class EDGARConnect:
         """
         attempts = 0
 
-        try:
-            self._update_user_agent()
-            filing = self.http.get(target_url, headers=self.header, timeout=timeout)
-
-            with open(out_path, "w") as file:
-                file.write(filing.content.decode("utf-8", "ignore"))
-
-        except (
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ):
-            _log.info(
-                f"\nAttempt {attempts + 1} failed for {new_filename} due to timeout/connection error"
-            )
-            attempts += 1
-            if attempts < 2:
+        while attempts < max_attempts:
+            try:
                 self._update_user_agent()
+                filing = self.http.get(target_url, headers=self.header, timeout=timeout)
 
-            else:
-                _log.info(f"\nSkipping {new_filename} after 2 failed attempts")
+                with open(out_path, "w") as file:
+                    file.write(filing.content.decode("utf-8", "ignore"))
                 return
 
+            except (
+                requests.exceptions.Timeout,
+                requests.exceptions.ConnectionError,
+            ):
+                _log.info(
+                    f"\nAttempt {attempts + 1} failed for {new_filename} due to timeout/connection error"
+                )
+                attempts += 1
+
+        _log.info(f"\nSkipping {new_filename} after {max_attempts} failed attempts")
+
     def download_requested_filings(
-        self, ignore_time_guidelines=False, remove_attachments=False, timeout=30
+        self,
+        ignore_time_guidelines=False,
+        remove_attachments=False,
+        timeout: int = 30,
+        max_attempts: int = 2,
     ):
         """
         Method for downloading all forms meeting the requirements set in the configure_downloader() method.
@@ -315,6 +322,8 @@ class EDGARConnect:
             If True, removes embedded attachments from filings to save disk space. Default is False.
         timeout: int, optional
             Maximum number of seconds to wait for a file download before skipping it.
+        max_attempts: int, optional
+            Maximum number of tries to download a file before skipping it.
 
         Returns
         -------
@@ -340,7 +349,7 @@ class EDGARConnect:
                 _log.info(f"Beginning scraping from {date_str}")
                 self._time_check(ignore_time_guidelines)
 
-                path = os.path.join(self.master_path, file_path)
+                path = self.master_path / file_path
                 df = pd.read_csv(path, delimiter="|")
                 df = df.drop_duplicates()
 
@@ -390,7 +399,7 @@ class EDGARConnect:
                         for iterrow_tuple in rows_to_query.iterrows():
                             idx, row = iterrow_tuple
                             new_filename = new_filenames[idx]
-                            out_path = os.path.join(out_dir, new_filename)
+                            out_path = out_dir / new_filename
 
                             target_url = self.edgar_url + "/" + row["Filename"]
                             referer = target_url.replace(".txt", "-index.html")
@@ -400,6 +409,7 @@ class EDGARConnect:
                                 out_path=out_path,
                                 new_filename=new_filename,
                                 timeout=timeout,
+                                max_attempts=max_attempts,
                             )
                             if remove_attachments:
                                 self.strip_attachments_from_filing(out_path)
@@ -450,7 +460,7 @@ class EDGARConnect:
         ]
 
         for file in required_files:
-            file_path = os.path.join(self.master_path, file)
+            file_path = self.master_path / file
             df = pd.read_csv(file_path, delimiter="|")
             form_counter.update(df.Form_type)
 
@@ -495,7 +505,7 @@ class EDGARConnect:
         ) < self.update_user_agent_interval
 
         if time_to_update or force_update:
-            self.header["User-Agent"] = self.user_agent.random_user_agent()
+            self.header["User-Agent"] = self.user_agent.update_user_agent()
             self.last_user_agent_change = time.time()
 
     def _check_config(self):
@@ -524,11 +534,9 @@ class EDGARConnect:
         -------
         None
         """
-        self.master_path = os.path.join(self.edgar_path, "master_indexes")
-
-        self._master_paths_configured = os.path.isdir(self.master_path)
+        self._master_paths_configured = self.master_path.is_dir()
         if not self._master_paths_configured:
-            os.mkdir(self.master_path)
+            self.master_path.mkdir()
 
     def _check_all_required_indexes_are_downloaded(self):
         """
@@ -547,13 +555,15 @@ class EDGARConnect:
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        index_files = os.listdir(self.master_path)
+        index_files = list(self.master_path.iterdir())
         required_files = [
             f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
             for i in range(n_quarters)
         ]
 
-        file_checks = [file in index_files for file in required_files]
+        file_checks = [
+            self.master_path / file in index_files for file in required_files
+        ]
 
         if not all(file_checks):
             error = (
@@ -619,10 +629,10 @@ class EDGARConnect:
         target_quarter = date.quarter
         target_url = f"{self.edgar_url}/edgar/full-index/{target_year}/QTR{target_quarter}/master.zip"
 
-        out_path = os.path.join(self.master_path, f"{target_year}Q{target_quarter}.txt")
+        out_path = self.master_path / f"{target_year}Q{target_quarter}.txt"
         file_downloaded = True
 
-        if not os.path.isfile(out_path) or force_redownload:
+        if not out_path.is_file() or force_redownload:
             file_downloaded = False
             with open(out_path, "w") as file:
                 file.write("CIK|Company_Name|Form_type|Date_filed|Filename\n")
@@ -720,10 +730,10 @@ class EDGARConnect:
             The path to the created directory.
         """
         dirsafe_form = form_type.replace("/", "")
-        out_dir = os.path.join(self.edgar_path, dirsafe_form)
+        out_dir = Path(self.edgar_path) / dirsafe_form
 
-        if not os.path.isdir(out_dir):
-            os.mkdir(out_dir)
+        if not out_dir.is_dir():
+            out_dir.mkdir()
 
         return out_dir
 
@@ -819,10 +829,12 @@ class EDGARConnect:
         bool
             True if the file exists, False otherwise.
         """
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
+        out_dir = Path(out_dir)
+        out_path = Path(out_path)
+        if not out_dir.is_dir():
+            out_dir.mkdir(parents=True)
 
-        return os.path.isfile(out_path)
+        return out_path.is_file()
 
     @staticmethod
     def _check_time_is_SEC_recommended():
