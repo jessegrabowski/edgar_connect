@@ -8,7 +8,7 @@ dependencies:
   - rich
   - requests
   - pytz
-  - fake-useragent
+  - faker
 
   - pytest
   - pytest-cov
