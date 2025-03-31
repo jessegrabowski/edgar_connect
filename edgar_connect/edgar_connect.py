@@ -14,7 +14,7 @@ import re
 import pytz
 from collections import Counter
 from edgar_connect.exceptions import SECServerClosedError
-from fake_useragent import UserAgent
+from edgar_connect.user_agent import UserAgent
 
 from rich.progress import (
     Progress,
@@ -99,12 +99,11 @@ class EDGARConnect:
             )
 
         self.edgar_url = edgar_url
-        self._provided_user_agent = user_agent
-        self.user_agent = UserAgent() if user_agent is None else user_agent
+        self.user_agent = UserAgent(user_agent=user_agent)
 
         if header is None:
             header = {
-                "User-Agent": self.user_agent.random,
+                "User-Agent": self.user_agent.random_user_agent(),
                 "Accept-Encoding": "gzip, deflate, br",
                 "Accept-Language": "en-us",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -242,8 +241,64 @@ class EDGARConnect:
         self.end_date = pd.to_datetime(end_date).to_period("Q")
         self._configured = True
 
+    def _download_file_with_retries(
+        self,
+        target_url: str,
+        out_path: str,
+        new_filename: str,
+        timeout: int = 30,
+    ):
+        """
+        Download a file from the specified URL and save it locally, retrying once on connection or timeout errors.
+
+        This function attempts to download the content from `target_url` and writes it to `out_path`.
+        It updates the user agent before making the HTTP request and handles potential timeouts or
+        connection errors by retrying the request one additional time. If the download fails after two attempts,
+        it logs the failure and skips saving the file.
+
+        Parameters
+        ----------
+        target_url : str
+            The URL from which to download the file.
+        out_path : str
+            The full path (including the file name) where the downloaded content will be saved.
+        new_filename : str
+            The new file name used for logging purposes to identify the file.
+        timeout : int, optional
+            The timeout in seconds for the HTTP request, by default 30.
+
+        Returns
+        -------
+        None
+            This function does not return a value. On successful download, the file is written to disk;
+            otherwise, it logs an error message after the allowed retry attempts.
+        """
+        attempts = 0
+
+        try:
+            self._update_user_agent()
+            filing = self.http.get(target_url, headers=self.header, timeout=timeout)
+
+            with open(out_path, "w") as file:
+                file.write(filing.content.decode("utf-8", "ignore"))
+
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ):
+            print(
+                f"\nAttempt {attempts + 1} failed for {new_filename} due to timeout/connection error"
+            )
+            attempts += 1
+            if attempts < 2:
+                self._update_user_agent()
+
+            else:
+                print(f"\nSkipping {new_filename} after 2 failed attempts")
+                return
+
     def download_requested_filings(
-        self, ignore_time_guidelines=False, remove_attachments=False
+        self, ignore_time_guidelines=False, remove_attachments=False, timeout=30
     ):
         """
         Method for downloading all forms meeting the requirements set in the configure_downloader() method.
@@ -254,6 +309,8 @@ class EDGARConnect:
             If True, allows downloads outside of SEC recommended times. Default is False.
         remove_attachments : bool, optional
             If True, removes embedded attachments from filings to save disk space. Default is False.
+        timeout: int, optional
+            Maximum number of seconds to wait for a file download before skipping it.
 
         Returns
         -------
@@ -267,7 +324,7 @@ class EDGARConnect:
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        print(f"Gathering URLS for the requested forms...")
+        print("Gathering URLS for the requested forms...")
         required_files = [
             f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
             for i in range(n_quarters)
@@ -334,17 +391,16 @@ class EDGARConnect:
                             target_url = self.edgar_url + "/" + row["Filename"]
                             referer = target_url.replace(".txt", "-index.html")
                             self.header["Referer"] = referer
-
-                            filing = self.http.get(target_url, headers=self.header)
-
-                            with open(out_path, "w") as file:
-                                file.write(filing.content.decode("utf-8", "ignore"))
-
+                            self._download_file_with_retries(
+                                target_url=target_url,
+                                out_path=out_path,
+                                new_filename=new_filename,
+                                timeout=timeout,
+                            )
                             if remove_attachments:
                                 self.strip_attachments_from_filing(out_path)
 
                             progress.update(task, advance=1)
-                            self._update_user_agent()
                         progress.update(
                             task, total=n_forms, completed=n_forms, refresh=True
                         )
@@ -430,15 +486,12 @@ class EDGARConnect:
         -------
         None
         """
-        if self._provided_user_agent is not None:
-            return
-
         time_to_update = (
             time.time() - self.last_user_agent_change
         ) < self.update_user_agent_interval
 
         if time_to_update or force_update:
-            self.header["User-Agent"] = self.user_agent.random
+            self.header["User-Agent"] = self.user_agent.random_user_agent()
             self.last_user_agent_change = time.time()
 
     def _check_config(self):
