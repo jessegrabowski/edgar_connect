@@ -1,9 +1,11 @@
 import os
 import time
+import logging
+from copy import deepcopy
 from datetime import datetime as dt
 import requests
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 import pandas as pd
 import numpy as np
 
@@ -14,7 +16,7 @@ import re
 import pytz
 from collections import Counter
 from edgar_connect.exceptions import SECServerClosedError
-from fake_useragent import UserAgent
+from edgar_connect.user_agent import UserAgent
 
 from rich.progress import (
     Progress,
@@ -24,6 +26,18 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.console import Console
+from pathlib import Path
+
+
+_log = logging.getLogger(__name__)
+
+
+RETRY_DEFAULTS = dict(
+    total=8,
+    backoff_factor=1,
+    status_forcelist=[403, 429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS"],
+)
 
 
 class EDGARConnect:
@@ -89,22 +103,12 @@ class EDGARConnect:
         download_requested_filings() method. Note that download settings must first be set using the
         configure_downloader() method.
         """
-
-        if retry_kwargs is None:
-            retry_kwargs = dict(
-                total=8,
-                backoff_factor=1,
-                status_forcelist=[403, 429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS"],
-            )
-
         self.edgar_url = edgar_url
-        self._provided_user_agent = user_agent
-        self.user_agent = UserAgent() if user_agent is None else user_agent
+        self.user_agent = UserAgent(user_agent=user_agent)
 
         if header is None:
             header = {
-                "User-Agent": self.user_agent.random,
+                "User-Agent": self.user_agent.update_user_agent(),
                 "Accept-Encoding": "gzip, deflate, br",
                 "Accept-Language": "en-us",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -115,12 +119,10 @@ class EDGARConnect:
         self.last_user_agent_change = time.time()
         self.update_user_agent_interval = update_user_agent_interval
 
-        retry_strategy = Retry(**retry_kwargs)
-        self.adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.http = requests.Session()
-        self.http.mount("https://", self.adapter)
+        self.http = self._build_session(retry_kwargs)
 
         self.edgar_path = edgar_path
+        self.master_path = Path(self.edgar_path) / "master_indexes"
         self._check_for_required_directories()
 
         self.forms = dict(
@@ -142,6 +144,29 @@ class EDGARConnect:
         self.target_forms = None
         self._configured = False
         self.time_message_displayed = False
+
+    def _build_session(self, retry_kwargs: dict | None = None):
+        """
+        Build a requests session with the given retry strategy.
+
+        Parameters
+        ----------
+        retry_kwargs : dict
+            A dictionary of keyword arguments to pass to requests.packages.urllib3.util.retry.Retry.
+
+        Returns
+        -------
+        requests.Session
+            A configured requests session.
+        """
+        if retry_kwargs is None:
+            retry_kwargs = deepcopy(RETRY_DEFAULTS)
+
+        retry_strategy = Retry(**retry_kwargs)
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session = requests.Session()
+        session.mount("https://", adapter)
+        return session
 
     @staticmethod
     def _make_progress_bar():
@@ -242,8 +267,56 @@ class EDGARConnect:
         self.end_date = pd.to_datetime(end_date).to_period("Q")
         self._configured = True
 
+    def _download_and_save_filing(
+        self,
+        target_url: str,
+        out_path: str,
+        new_filename: str,
+        timeout: int = 30,
+    ):
+        """
+        Download a file from the specified URL and save it locally.
+
+        This function attempts to download the content from `target_url` and writes it to `out_path`.
+        It updates the user agent before making the HTTP request and handles potential timeouts or
+        connection errors by retrying the request based on the configured retry strategy.
+
+        Parameters
+        ----------
+        target_url : str
+            The URL from which to download the file.
+        out_path : str
+            The full path (including the file name) where the downloaded content will be saved.
+        new_filename : str
+            The new file name used for logging purposes to identify the file.
+        timeout : int, optional
+            The timeout in seconds for the HTTP request, by default 30.
+
+        Returns
+        -------
+        None
+            This function does not return a value. On successful download, the file is written to disk;
+            otherwise, it logs an error message.
+        """
+        try:
+            self._update_user_agent()
+            filing = self.http.get(target_url, headers=self.header, timeout=timeout)
+
+            with open(out_path, "w") as file:
+                file.write(filing.content.decode("utf-8", "ignore"))
+
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as e:
+            _log.info(f"\nFailed to download {new_filename} due to {str(e)}")
+
     def download_requested_filings(
-        self, ignore_time_guidelines=False, remove_attachments=False
+        self,
+        ignore_time_guidelines=False,
+        remove_attachments=False,
+        timeout: int = 30,
+        retry_kwargs=None,
     ):
         """
         Method for downloading all forms meeting the requirements set in the configure_downloader() method.
@@ -254,7 +327,11 @@ class EDGARConnect:
             If True, allows downloads outside of SEC recommended times. Default is False.
         remove_attachments : bool, optional
             If True, removes embedded attachments from filings to save disk space. Default is False.
-
+        timeout: int, optional
+            Maximum number of seconds to wait for a file download before skipping it.
+        retry_kwargs: dict, optional
+            Keyword arguments passed to urllib3.util.retry.Retry. This tool configures how and under what conditions
+            a connection is re-tried after a timeout or bad status code.
         Returns
         -------
         None
@@ -263,11 +340,14 @@ class EDGARConnect:
         self._check_config()
         self._time_check(ignore_time_guidelines)
 
+        if retry_kwargs is not None:
+            self.http = self._build_session(retry_kwargs)
+
         start_date = self.start_date
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        print(f"Gathering URLS for the requested forms...")
+        _log.info("Gathering URLS for the requested forms...")
         required_files = [
             f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
             for i in range(n_quarters)
@@ -276,10 +356,10 @@ class EDGARConnect:
         with self._make_progress_bar() as progress:
             for i, file_path in enumerate(required_files):
                 date_str = required_files[i].split(".")[0]
-                print(f"Beginning scraping from {date_str}")
+                _log.info(f"Beginning scraping from {date_str}")
                 self._time_check(ignore_time_guidelines)
 
-                path = os.path.join(self.master_path, file_path)
+                path = self.master_path / file_path
                 df = pd.read_csv(path, delimiter="|")
                 df = df.drop_duplicates()
 
@@ -301,11 +381,11 @@ class EDGARConnect:
 
                     if n_targets == 0:
                         if n_forms == 0:
-                            print(
+                            _log.info(
                                 f"{date_str} {form:<10} No filings found on EDGAR, continuing..."
                             )
                         else:
-                            print(
+                            _log.info(
                                 f"{date_str} {form:<10} All filings downloaded, continuing..."
                             )
                     else:
@@ -315,7 +395,7 @@ class EDGARConnect:
                         n_to_download = rows_to_query.shape[0]
                         n_already_downloaded = n_forms - n_to_download
 
-                        print(
+                        _log.info(
                             f"{date_str} {form:<10} Found {n_already_downloaded} / {n_forms} locally, requesting "
                             f"the remaining {n_to_download}..."
                         )
@@ -329,22 +409,21 @@ class EDGARConnect:
                         for iterrow_tuple in rows_to_query.iterrows():
                             idx, row = iterrow_tuple
                             new_filename = new_filenames[idx]
-                            out_path = os.path.join(out_dir, new_filename)
+                            out_path = out_dir / new_filename
 
                             target_url = self.edgar_url + "/" + row["Filename"]
                             referer = target_url.replace(".txt", "-index.html")
                             self.header["Referer"] = referer
-
-                            filing = self.http.get(target_url, headers=self.header)
-
-                            with open(out_path, "w") as file:
-                                file.write(filing.content.decode("utf-8", "ignore"))
-
+                            self._download_and_save_filing(
+                                target_url=target_url,
+                                out_path=out_path,
+                                new_filename=new_filename,
+                                timeout=timeout,
+                            )
                             if remove_attachments:
                                 self.strip_attachments_from_filing(out_path)
 
                             progress.update(task, advance=1)
-                            self._update_user_agent()
                         progress.update(
                             task, total=n_forms, completed=n_forms, refresh=True
                         )
@@ -390,30 +469,30 @@ class EDGARConnect:
         ]
 
         for file in required_files:
-            file_path = os.path.join(self.master_path, file)
+            file_path = self.master_path / file
             df = pd.read_csv(file_path, delimiter="|")
             form_counter.update(df.Form_type)
 
         form_sum = 0
 
-        print(
+        _log.info(
             f"EDGARConnect is prepared to download {len(forms)} types of filings between {start_date} and {end_date}"
         )
         for form in forms:
-            print(f"\tNumber of {form}s: {form_counter[form]}")
+            _log.info(f"\tNumber of {form}s: {form_counter[form]}")
             form_sum += form_counter[form]
 
-        print("=" * 30)
-        print(f"\tTotal files: {form_sum}")
+        _log.info("=" * 30)
+        _log.info(f"\tTotal files: {form_sum}")
 
         m, s = np.divmod(form_sum, 60)
         h, m = np.divmod(m, 60)
         d, h = np.divmod(h, 24)
 
-        print(
+        _log.info(
             f"Estimated download time, assuming 1s per file: {d} Days, {h} hours, {m} minutes, {s} seconds"
         )
-        print(
+        _log.info(
             f"Estimated drive space, assuming 150KB per filing: {form_sum * 150 * 1e-6:0.2f}GB"
         )
 
@@ -430,15 +509,12 @@ class EDGARConnect:
         -------
         None
         """
-        if self._provided_user_agent is not None:
-            return
-
         time_to_update = (
             time.time() - self.last_user_agent_change
         ) < self.update_user_agent_interval
 
         if time_to_update or force_update:
-            self.header["User-Agent"] = self.user_agent.random
+            self.header["User-Agent"] = self.user_agent.update_user_agent()
             self.last_user_agent_change = time.time()
 
     def _check_config(self):
@@ -467,11 +543,9 @@ class EDGARConnect:
         -------
         None
         """
-        self.master_path = os.path.join(self.edgar_path, "master_indexes")
-
-        self._master_paths_configured = os.path.isdir(self.master_path)
+        self._master_paths_configured = self.master_path.is_dir()
         if not self._master_paths_configured:
-            os.mkdir(self.master_path)
+            self.master_path.mkdir()
 
     def _check_all_required_indexes_are_downloaded(self):
         """
@@ -490,13 +564,15 @@ class EDGARConnect:
         end_date = self.end_date
         n_quarters = (end_date - start_date).n + 1
 
-        index_files = os.listdir(self.master_path)
+        index_files = list(self.master_path.iterdir())
         required_files = [
             f"{(start_date + i).year}Q{(start_date + i).quarter}.txt"
             for i in range(n_quarters)
         ]
 
-        file_checks = [file in index_files for file in required_files]
+        file_checks = [
+            self.master_path / file in index_files for file in required_files
+        ]
 
         if not all(file_checks):
             error = (
@@ -562,10 +638,10 @@ class EDGARConnect:
         target_quarter = date.quarter
         target_url = f"{self.edgar_url}/edgar/full-index/{target_year}/QTR{target_quarter}/master.zip"
 
-        out_path = os.path.join(self.master_path, f"{target_year}Q{target_quarter}.txt")
+        out_path = self.master_path / f"{target_year}Q{target_quarter}.txt"
         file_downloaded = True
 
-        if not os.path.isfile(out_path) or force_redownload:
+        if not out_path.is_file() or force_redownload:
             file_downloaded = False
             with open(out_path, "w") as file:
                 file.write("CIK|Company_Name|Form_type|Date_filed|Filename\n")
@@ -663,10 +739,10 @@ class EDGARConnect:
             The path to the created directory.
         """
         dirsafe_form = form_type.replace("/", "")
-        out_dir = os.path.join(self.edgar_path, dirsafe_form)
+        out_dir = Path(self.edgar_path) / dirsafe_form
 
-        if not os.path.isdir(out_dir):
-            os.mkdir(out_dir)
+        if not out_dir.is_dir():
+            out_dir.mkdir()
 
         return out_dir
 
@@ -762,10 +838,12 @@ class EDGARConnect:
         bool
             True if the file exists, False otherwise.
         """
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
+        out_dir = Path(out_dir)
+        out_path = Path(out_path)
+        if not out_dir.is_dir():
+            out_dir.mkdir(parents=True)
 
-        return os.path.isfile(out_path)
+        return out_path.is_file()
 
     @staticmethod
     def _check_time_is_SEC_recommended():
@@ -806,7 +884,7 @@ class EDGARConnect:
         SEC_servers_open = self._check_time_is_SEC_recommended()
 
         if not SEC_servers_open and not ignore_time_guidelines:
-            print("""SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
+            _log.warning("""SEC guidelines request batch downloads be done between 9PM and 6AM EST. If you plan to download
                      a lot of stuff, it is strongly recommended that you wait until then to begin. If your query size
                      is relatively small, or if it's big but you feel like ignoring this guidance from the good people
                      at the SEC, re-run this function with the argument:
